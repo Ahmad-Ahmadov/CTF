@@ -5,13 +5,13 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"io"
 	"net/http"
 	"path/filepath"
 	"strings"
 	"time"
-	"encoding/base64"
 
 	"github.com/atomic-protocol/internal/db/models"
 	"github.com/atomic-protocol/internal/services"
@@ -28,11 +28,11 @@ type DocumentHandler struct {
 }
 
 type Signer struct {
-    Username    string
-    UserID      uint
-    SignedAt    time.Time
-    Last        bool
-    RawSignature string
+	Username     string
+	UserID       uint
+	SignedAt     time.Time
+	Last         bool
+	RawSignature string
 }
 
 type DocSummary struct {
@@ -110,76 +110,76 @@ func (h *DocumentHandler) ShowDashboard(c *gin.Context) {
 }
 
 func (h *DocumentHandler) ListDocuments(c *gin.Context) {
-    username := c.GetString("username")
-    userID, _ := c.Get("userID")
+	username := c.GetString("username")
+	userID, _ := c.Get("userID")
 
-    docs, err := h.documentService.ListDocuments(c.Request.Context(), userID.(int))
-    if err != nil {
-        h.logger.Error("list documents failed", zap.Error(err))
-        c.HTML(http.StatusInternalServerError, "root/error.html", gin.H{
-            "message": "Error retrieving documents",
-            "User":    username,
-        })
-        return
-    }
+	docs, err := h.documentService.ListDocuments(c.Request.Context(), userID.(int))
+	if err != nil {
+		h.logger.Error("list documents failed", zap.Error(err))
+		c.HTML(http.StatusInternalServerError, "root/error.html", gin.H{
+			"message": "Error retrieving documents",
+			"User":    username,
+		})
+		return
+	}
 
-    var users []models.User
-    if err := h.db.Find(&users).Error; err != nil {
-        h.logger.Error("failed to load users", zap.Error(err))
-        users = []models.User{}
-    }
-    requiredSignatures := len(users)
+	var users []models.User
+	if err := h.db.Find(&users).Error; err != nil {
+		h.logger.Error("failed to load users", zap.Error(err))
+		users = []models.User{}
+	}
+	requiredSignatures := len(users)
 
-    userMap := make(map[uint]string)
-    for _, u := range users {
-        userMap[u.ID] = u.Username
-    }
+	userMap := make(map[uint]string)
+	for _, u := range users {
+		userMap[u.ID] = u.Username
+	}
 
-    summaries := make([]DocSummary, len(docs))
-    for i, d := range docs {
-        var signatures []models.DocumentSignature
-        if err := h.db.Where("document_id = ?", d.ID).
-            Order("timestamp ASC").
-            Find(&signatures).Error; err != nil {
-            h.logger.Warn("failed to load signatures", zap.Error(err), zap.String("doc_id", d.ID))
-            signatures = []models.DocumentSignature{}
-        }
+	summaries := make([]DocSummary, len(docs))
+	for i, d := range docs {
+		var signatures []models.DocumentSignature
+		if err := h.db.Where("document_id = ?", d.ID).
+			Order("timestamp ASC").
+			Find(&signatures).Error; err != nil {
+			h.logger.Warn("failed to load signatures", zap.Error(err), zap.String("doc_id", d.ID))
+			signatures = []models.DocumentSignature{}
+		}
 
-        signers := make([]Signer, len(signatures))
-        for j, sig := range signatures {
-            signerUsername := userMap[sig.UserID]
-            if signerUsername == "" {
-                signerUsername = "Unknown User"
-            }
+		signers := make([]Signer, len(signatures))
+		for j, sig := range signatures {
+			signerUsername := userMap[sig.UserID]
+			if signerUsername == "" {
+				signerUsername = "Unknown User"
+			}
 
-            encodedSig := base64.StdEncoding.EncodeToString(sig.Signature)
-            
-            signers[j] = Signer{
-                Username:    signerUsername,
-                UserID:      sig.UserID,
-                SignedAt:    sig.Timestamp,
-                Last:        j == len(signatures)-1,
-                RawSignature: encodedSig,
-            }
-        }
+			encodedSig := base64.StdEncoding.EncodeToString(sig.Signature)
 
-        summaries[i] = DocSummary{
-            ID:                 d.ID,
-            Title:              d.Title,
-            CreatedAt:          d.CreatedAt,
-            Classification:     d.Classification,
-            Status:             d.Status,
-            SignatureCount:     len(signatures),
-            RequiredSignatures: requiredSignatures,
-            Signers:            signers,
-        }
-    }
+			signers[j] = Signer{
+				Username:     signerUsername,
+				UserID:       sig.UserID,
+				SignedAt:     sig.Timestamp,
+				Last:         j == len(signatures)-1,
+				RawSignature: encodedSig,
+			}
+		}
 
-    c.HTML(http.StatusOK, "documents/list.html", gin.H{
-        "Title":     "User's Documents",
-        "User":      username,
-        "Documents": summaries,
-    })
+		summaries[i] = DocSummary{
+			ID:                 d.ID,
+			Title:              d.Title,
+			CreatedAt:          d.CreatedAt,
+			Classification:     d.Classification,
+			Status:             d.Status,
+			SignatureCount:     len(signatures),
+			RequiredSignatures: requiredSignatures,
+			Signers:            signers,
+		}
+	}
+
+	c.HTML(http.StatusOK, "documents/list.html", gin.H{
+		"Title":     "User's Documents",
+		"User":      username,
+		"Documents": summaries,
+	})
 }
 
 func (h *DocumentHandler) ShowUploadPage(c *gin.Context) {
@@ -246,30 +246,30 @@ func (h *DocumentHandler) UploadDocument(c *gin.Context) {
 	}
 
 	h.logger.Info("Document created, proceeding to automatic signing", zap.String("doc_id", docID))
-	
+
 	hash := sha256.Sum256(content)
-	
+
 	priv, err := h.keyService.UsePrivateKey(userID.(int))
 	if err != nil {
 		h.logger.Error("auto-signing failed: could not load key", zap.Error(err), zap.String("doc_id", docID))
 		c.Redirect(http.StatusSeeOther, "/documents")
 		return
 	}
-	
+
 	sig, err := rsa.SignPKCS1v15(rand.Reader, priv, crypto.SHA256, hash[:])
 	if err != nil {
 		h.logger.Error("auto-signing failed: could not create signature", zap.Error(err), zap.String("doc_id", docID))
 		c.Redirect(http.StatusSeeOther, "/documents")
 		return
 	}
-	
+
 	err = h.documentService.SignWithUserKey(c.Request.Context(), docID, userIDUint, sig)
 	if err != nil {
 		h.logger.Warn("auto-signing failed: could not save signature", zap.Error(err), zap.String("doc_id", docID))
 		c.Redirect(http.StatusSeeOther, "/documents")
 		return
 	}
-	
+
 	if classification == "CONFIDENTIAL" {
 		if err := h.documentService.MarkSigned(c.Request.Context(), docID); err != nil {
 			h.logger.Error("couldn't mark CONFIDENTIAL document as signed", zap.Error(err), zap.String("doc_id", docID))
@@ -288,7 +288,7 @@ func (h *DocumentHandler) UploadDocument(c *gin.Context) {
 			}
 		}
 	}
-	
+
 	h.logger.Info("Document automatically signed by uploader", zap.String("doc_id", docID))
 	c.Redirect(http.StatusSeeOther, "/documents")
 }
@@ -440,13 +440,44 @@ func (h *DocumentHandler) SignDocument(c *gin.Context) {
 
 func (h *DocumentHandler) ReclassifyDocument(c *gin.Context) {
 	username := c.GetString("username")
-	userID, _ := c.Get("userID")
+
+	userIDVal, exists := c.Get("userID")
+	if !exists {
+		c.HTML(http.StatusUnauthorized, "root/error.html", gin.H{
+			"message": "Unauthorized access",
+			"User":    username,
+			"Title":   "Error",
+		})
+		return
+	}
+
+	userID, ok := userIDVal.(uint)
+	if !ok {
+		c.HTML(http.StatusUnauthorized, "root/error.html", gin.H{
+			"message": "Invalid user session",
+			"User":    username,
+			"Title":   "Error",
+		})
+		return
+	}
+
 	docID := c.Query("id")
 	newClass := c.Query("class")
 
 	if docID == "" || newClass == "" {
 		c.HTML(http.StatusBadRequest, "root/error.html", gin.H{
 			"message": "Missing document ID or classification",
+			"User":    username,
+			"Title":   "Error",
+		})
+		return
+	}
+
+	// Optionally: validate newClass against a known set
+	validClasses := map[string]bool{"confidential": true, "restricted": true, "public": true}
+	if !validClasses[newClass] {
+		c.HTML(http.StatusBadRequest, "root/error.html", gin.H{
+			"message": "Invalid classification level",
 			"User":    username,
 			"Title":   "Error",
 		})

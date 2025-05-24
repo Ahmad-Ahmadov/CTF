@@ -3,6 +3,7 @@ package handlers
 import (
 	"io"
 	"net/http"
+	"regexp"
 	"time"
 
 	"github.com/atomic-protocol/internal/db/models"
@@ -63,6 +64,7 @@ func (ah *AuthHandler) Login(c *gin.Context) {
 			return
 		}
 		defer f.Close()
+
 		data, err := io.ReadAll(f)
 		if err != nil {
 			c.HTML(http.StatusBadRequest, "auth/login.html", gin.H{
@@ -72,9 +74,9 @@ func (ah *AuthHandler) Login(c *gin.Context) {
 			})
 			return
 		}
+
 		datatext := string(data)
 		sig, certData, err := utils.ExtractCertData(datatext)
-
 		if err != nil {
 			ah.logger.Warn("Invalid certificate format", zap.Error(err))
 			c.HTML(http.StatusBadRequest, "auth/login.html", gin.H{
@@ -105,15 +107,18 @@ func (ah *AuthHandler) Login(c *gin.Context) {
 			return
 		}
 	} else {
-		if username == "" || password == "" {
+		usernameRegex := regexp.MustCompile(`^[a-zA-Z0-9_.-]{3,32}$`)
+		if !usernameRegex.MatchString(username) {
+			ah.logger.Warn("Invalid username format", zap.String("username", username))
 			c.HTML(http.StatusBadRequest, "auth/login.html", gin.H{
 				"Title":   "Login",
-				"message": "Username and password required",
+				"message": "Invalid username format",
 				"error":   true,
 			})
 			return
 		}
-		if res := ah.db.Where("username = ?", username).First(&user); res.Error != nil {
+
+		if res := ah.db.Where(&models.User{Username: username}).First(&user); res.Error != nil {
 			ah.logger.Warn("Invalid username", zap.String("username", username))
 			c.HTML(http.StatusUnauthorized, "auth/login.html", gin.H{
 				"Title":   "Login",
@@ -122,6 +127,7 @@ func (ah *AuthHandler) Login(c *gin.Context) {
 			})
 			return
 		}
+
 		if ok, err := utils.VerifyPassword(user.PasswordHash, password); !ok || err != nil {
 			ah.logger.Warn("Invalid password", zap.String("username", username))
 			c.HTML(http.StatusUnauthorized, "auth/login.html", gin.H{
@@ -131,6 +137,7 @@ func (ah *AuthHandler) Login(c *gin.Context) {
 			})
 			return
 		}
+
 		if !user.ActiveStatus {
 			ah.logger.Warn("Inactive account login", zap.String("username", username))
 			c.HTML(http.StatusUnauthorized, "auth/login.html", gin.H{
@@ -157,8 +164,10 @@ func (ah *AuthHandler) Login(c *gin.Context) {
 		})
 		return
 	}
+
 	ah.keyService.LoadUserPrivateKey(c.Request.Context(), user.ID)
 	ah.db.Model(&user).Update("last_login", time.Now())
+
 	c.SetCookie("session_token", token, 3600, "/", "", false, true)
 	c.Redirect(http.StatusSeeOther, "/dashboard")
 }

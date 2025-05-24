@@ -37,15 +37,22 @@ func (am *AuthMiddleware) RequireAuth() gin.HandlerFunc {
 			return
 		}
 
-		c.Set("userID", userID)
-		var user models.User
-		err = am.db.First(&user, userID).Error
+		id := userID
+		if id == 0 {
+			c.Redirect(http.StatusSeeOther, "/login")
+			c.Abort()
+			return
+		}
 
+		var user models.User
+		err = am.db.First(&user, id).Error
 		if err != nil {
 			c.Redirect(http.StatusSeeOther, "/login")
 			c.Abort()
 			return
 		}
+
+		c.Set("userID", user.ID)
 		c.Set("username", user.Username)
 		c.Set("role", user.Role)
 		c.Next()

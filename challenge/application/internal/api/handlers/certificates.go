@@ -2,14 +2,14 @@ package handlers
 
 import (
 	"net/http"
+	"regexp"
+	"time"
 
 	"github.com/atomic-protocol/internal/db/models"
 	"github.com/atomic-protocol/internal/services"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
-
-	"time"
 )
 
 type CertificateHandler struct {
@@ -164,10 +164,18 @@ func (ch *CertificateHandler) DownloadCertificate(c *gin.Context) {
 
 	certID := c.PostForm("certificate_id")
 
-	ok, verr := ch.certificateService.VerifyCertificate(
-		c.Request.Context(),
-		certID,
-	)
+	validCertID := regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
+	if !validCertID.MatchString(certID) {
+		ch.logger.Warn("invalid certificate ID format", zap.String("cert_id", certID))
+		c.HTML(http.StatusBadRequest, "root/error.html", gin.H{
+			"Title":   "Invalid Request",
+			"message": "Invalid certificate ID",
+			"User":    username,
+		})
+		return
+	}
+
+	ok, verr := ch.certificateService.VerifyCertificate(c.Request.Context(), certID)
 	if !ok || verr != nil {
 		ch.logger.Warn("certificate verification failed", zap.String("cert_id", certID), zap.Error(verr))
 		c.HTML(http.StatusForbidden, "root/error.html", gin.H{
